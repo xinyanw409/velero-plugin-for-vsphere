@@ -82,13 +82,20 @@ func retrieveBackupStorageLocation(params map[string]interface{}, logger logrus.
 	if err != nil {
 		return err
 	}
+
+	veleroNs, exist := os.LookupEnv("VELERO_NAMESPACE")
+	if !exist {
+		logger.Errorf("RetrieveBackupStorageLocation: Failed to lookup the env variable for velero namespace")
+		return err
+	}
+
 	defaultBackupLocation := "default"
 	var backupStorageLocation *v1.BackupStorageLocation
-	backupStorageLocation, err = veleroClient.VeleroV1().BackupStorageLocations("velero").
+	backupStorageLocation, err = veleroClient.VeleroV1().BackupStorageLocations(veleroNs).
 		Get(defaultBackupLocation, metav1.GetOptions{})
 	if err != nil {
 		logger.Infof("Failed to get Velero default backup storage location with error message: %v", err)
-		backupStorageLocationList, err := veleroClient.VeleroV1().BackupStorageLocations("velero").List(metav1.ListOptions{})
+		backupStorageLocationList, err := veleroClient.VeleroV1().BackupStorageLocations(veleroNs).List(metav1.ListOptions{})
 		if err != nil || len(backupStorageLocationList.Items) <= 0 {
 			logger.Errorf("Failed to list Velero default backup storage location with error message: %v", err)
 			return err
@@ -128,7 +135,13 @@ func verifyLocalMode(logger logrus.FieldLogger) (bool, error) {
 		return isLocalMode, err
 	}
 
-	deployment, err := clientset.AppsV1().Deployments("velero").Get("velero", metav1.GetOptions{})
+	veleroNs, exist := os.LookupEnv("VELERO_NAMESPACE")
+	if !exist {
+		logger.Errorf("VerifyLocalMode: Failed to lookup the env variable for velero namespace")
+		return isLocalMode, err
+	}
+
+	deployment, err := clientset.AppsV1().Deployments(veleroNs).Get("velero", metav1.GetOptions{})
 	if err != nil {
 		logger.Errorf("Failed to get velero deployment using k8s client")
 		return isLocalMode, err
@@ -162,7 +175,7 @@ func verifyLocalMode(logger logrus.FieldLogger) (bool, error) {
 		return isLocalMode, err
 	}
 
-	volumeSnapshot, err := veleroClient.VeleroV1().VolumeSnapshotLocations("velero").Get(snapshotLocation, metav1.GetOptions{})
+	volumeSnapshot, err := veleroClient.VeleroV1().VolumeSnapshotLocations(veleroNs).Get(snapshotLocation, metav1.GetOptions{})
 	if err != nil {
 		logger.Errorf("Failed to get velero snapshot location using velero api client")
 		return isLocalMode, err
