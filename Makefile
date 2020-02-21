@@ -41,7 +41,7 @@ DATAMGR_IMAGE ?= $(REGISTRY)/$(DATAMGR_BIN)
 local : ARCH ?= $(shell go env GOOS)-$(shell go env GOARCH)
 ARCH ?= linux-amd64
 
-VERSION ?= latest
+VERSION ?= 0.9.0
 
 platform_temp = $(subst -, ,$(ARCH))
 GOOS = $(word 1, $(platform_temp))
