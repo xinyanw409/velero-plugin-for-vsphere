@@ -380,8 +380,17 @@ func CreateBackupRepositoryClaim(config *rest.Config, veleroNS string, pvcNS str
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to get backupdriver client using given config.")
 	}
-	allowedNS := []string{veleroNS, pvcNS}
-	BRC := builder.ForBackupRepositoryClaim(pvcNS, "").RepositoryDriver(S3Driver).AllowedNamespaces(allowedNS).Result()
+	params := make(map[string]interface{})
+	var logger logrus.FieldLogger
+	RetrieveVSLFromVeleroBSLs(params, logger)
+	repositoryparams := make(map[string]string)
+	for key, _ := range params {
+		val_str, ok := params[key].(string)
+		if ok {
+			repositoryparams[key] = val_str
+		}
+	}
+	BRC := builder.ForBackupRepositoryClaim(pvcNS, "").RepositoryDriver(S3Driver).RepositoryParameters(repositoryparams).Result()
 	_, err = backupdriverclient.BackupdriverV1().BackupRepositoryClaims(pvcNS).Create(BRC)
 	if err != nil {
 		return nil, errors.Wrap(err,"Failed to create new BackupRepositoryClaim")
