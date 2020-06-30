@@ -22,6 +22,9 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 	pluginv1api "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/veleroplugin/v1"
 	pluginv1client "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/generated/clientset/versioned/typed/veleroplugin/v1"
+	backupdriverv1api "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/backupdriver/v1"
+	backupdriver_clientset "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/generated/clientset/versioned"
+	"github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/builder"
 	"k8s.io/apimachinery/pkg/types"
 	"os"
 	"strconv"
@@ -365,4 +368,38 @@ func PatchUpload(req *pluginv1api.Upload, mutate func(*pluginv1api.Upload), uplo
 		return nil, errors.Wrapf(err, "Failed to patch Upload")
 	}
 	return req, nil
+}
+
+// IsSetToFalse returns true if and only if the bool pointer is non-nil and set to false.
+func IsSetToFalse(b *bool) bool {
+	return b != nil && *b == false
+}
+
+func CreateBackupRepositoryClaim(config *rest.Config, veleroNS string, pvcNS string) (*backupdriverv1api.BackupRepositoryClaim, error) {
+	backupdriverclient, err := backupdriver_clientset.NewForConfig(config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to get backupdriver client using given config.")
+	}
+	allowedNS := []string{veleroNS, pvcNS}
+	BRC := builder.ForBackupRepositoryClaim(pvcNS, "").RepositoryDriver(S3Driver).AllowedNamespaces(allowedNS).Result()
+	_, err = backupdriverclient.BackupdriverV1().BackupRepositoryClaims(pvcNS).Create(BRC)
+	if err != nil {
+		return nil, errors.Wrap(err,"Failed to create new BackupRepositoryClaim")
+	}
+	return BRC, nil
+}
+
+func GetBackupRepositoryClaim(config *rest.Config, veleroNS string, pvcNS string) (*backupdriverv1api.BackupRepositoryClaim, error) {
+	backupdriverclient, err := backupdriver_clientset.NewForConfig(config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Failed to get backupdriver client using given config.")
+	}
+	BRCList, err := backupdriverclient.BackupdriverV1().BackupRepositoryClaims(pvcNS).List(metav1.ListOptions{})
+	if len(BRCList.Items) == 0 {
+		errMsg := fmt.Sprintf("No BackupRepositoryClaim in namespace %s, need to create a new one.", pvcNS)
+		return nil, errors.New(errMsg)
+	}
+	// How to determine which one to use???
+	BRC := BRCList.Items[0]
+	return &BRC, nil
 }
