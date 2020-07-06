@@ -22,6 +22,7 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 	pluginv1api "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/veleroplugin/v1"
 	pluginv1client "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/generated/clientset/versioned/typed/veleroplugin/v1"
+	backupdriverv1 "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/backupdriver/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"os"
 	"strconv"
@@ -365,4 +366,18 @@ func PatchUpload(req *pluginv1api.Upload, mutate func(*pluginv1api.Upload), uplo
 		return nil, errors.Wrapf(err, "Failed to patch Upload")
 	}
 	return req, nil
+}
+
+func CreateRepositoryFromBackupRepository(backupRepository backupdriverv1.BackupRepository, logger logrus.FieldLogger) (*s3repository.ProtectedEntityTypeManager, error) {
+    switch (backupRepository.RepositoryDriver) {
+	case S3Driver:
+		params := make(map[string]interface{})
+		for k, v := range backupRepository.RepositoryParameters {
+			params[k] = v
+		}
+		return GetS3PETMFromParamsMap(params, logger)
+	default:
+		errMsg := fmt.Sprintf("Unsupported backuprepository driver type: %s. Only support %s.", backupRepository.RepositoryDriver, S3Driver)
+		return nil, errors.New(errMsg)
+	}
 }

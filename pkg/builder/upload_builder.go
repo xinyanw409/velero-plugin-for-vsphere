@@ -111,3 +111,9 @@ func (b *UploadBuilder) CurrentBackOff(backoff int32) *UploadBuilder {
 	b.object.Status.CurrentBackOff = backoff
 	return b
 }
+
+// BackupRepository sets the backup repository for upload.
+func (b *UploadBuilder) BackupRepository(backuprepo string) *UploadBuilder {
+	b.object.Spec.BackupRepository = backuprepo
+	return b
+}

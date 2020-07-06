@@ -27,6 +27,7 @@ import (
 	v1api "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/veleroplugin/v1"
 	"github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/builder"
 	plugin_clientset "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/generated/clientset/versioned"
+	backupdriverv1 "github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/apis/backupdriver/v1"
 	"github.com/vmware-tanzu/velero-plugin-for-vsphere/pkg/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -111,6 +112,80 @@ func NewSnapshotManagerFromCluster(params map[string]interface{}, config map[str
 	return &snapMgr, nil
 }
 
+func (this *SnapshotManager) CreateSnapshotWithBackupRepository(peID astrolabe.ProtectedEntityID, tags map[string]string, backupRepository *backupdriverv1.BackupRepository) (astrolabe.ProtectedEntityID, error) {
+	this.Infof("SnapshotManager.CreateSnapshot Called with peID %s, tags %v", peID.String(), tags)
+	this.Infof("Step 1: Creating a snapshot in local repository")
+	var updatedPeID astrolabe.ProtectedEntityID
+	ctx := context.Background()
+	pe, err := this.ivdPETM.GetProtectedEntity(ctx, peID)
+	if err != nil {
+		this.WithError(err).Errorf("Failed to GetProtectedEntity for %s", peID.String())
+		return astrolabe.ProtectedEntityID{}, err
+	}
+
+	var peSnapID astrolabe.ProtectedEntitySnapshotID
+	this.Infof("Ready to call astrolabe Snapshot API. Will retry on InvalidState error once per second for an hour at maximum")
+	err = wait.PollImmediate(time.Second, time.Hour, func() (bool, error) {
+		peSnapID, err = pe.Snapshot(ctx)
+
+		if err != nil {
+			if strings.Contains(err.Error(), "The operation is not allowed in the current state") {
+				this.Warnf("Keep retrying on InvalidState error")
+				return false, nil
+			} else {
+				return false, err
+			}
+		}
+		return true, nil
+	})
+	this.Debugf("Return from the call of astrolabe Snapshot API for PE %s", peID.String())
+
+	if err != nil {
+		this.WithError(err).Errorf("Failed to Snapshot PE for %s", peID.String())
+		return astrolabe.ProtectedEntityID{}, err
+	}
+
+	this.Debugf("constructing the returned PE snapshot id, %s", peSnapID.GetID())
+	updatedPeID = astrolabe.NewProtectedEntityIDWithSnapshotID(peID.GetPeType(), peID.GetID(), peSnapID)
+
+	this.Infof("Local IVD snapshot is created, %s", updatedPeID.String())
+
+	isLocalMode := utils.GetBool(this.config[utils.VolumeSnapshotterLocalMode], false)
+
+	if isLocalMode {
+		this.Infof("Skipping the remote copy in the local mode of Velero plugin for vSphere")
+		return updatedPeID, nil
+	}
+
+	this.Info("Start creating Upload CR")
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		this.WithError(err).Errorf("Failed to get k8s inClusterConfig")
+		return updatedPeID, err
+	}
+	pluginClient, err := plugin_clientset.NewForConfig(config)
+	if err != nil {
+		this.WithError(err).Errorf("Failed to get k8s clientset from the given config: %v ", config)
+		return updatedPeID, err
+	}
+
+	// look up velero namespace from the env variable in container
+	veleroNs, exist := os.LookupEnv("VELERO_NAMESPACE")
+	if !exist {
+		this.WithError(err).Errorf("CreateSnapshot: Failed to lookup the env variable for velero namespace")
+		return updatedPeID, err
+	}
+
+	upload := builder.ForUpload(veleroNs, "upload-"+peSnapID.GetID()).BackupTimestamp(time.Now()).NextRetryTimestamp(time.Now()).SnapshotID(updatedPeID.String()).Phase(v1api.UploadPhaseNew).BackupRepository(backupRepository.Name).Result()
+	_, err = pluginClient.VeleropluginV1().Uploads(veleroNs).Create(upload)
+	if err != nil {
+		this.WithError(err).Errorf("CreateSnapshot: Failed to create Upload CR for PE %s", updatedPeID.String())
+		return updatedPeID, err
+	}
+
+	return updatedPeID, nil
+}
+
 func (this *SnapshotManager) CreateSnapshot(peID astrolabe.ProtectedEntityID, tags map[string]string) (astrolabe.ProtectedEntityID, error) {
 	this.Infof("SnapshotManager.CreateSnapshot Called with peID %s, tags %v", peID.String(), tags)
 	this.Infof("Step 1: Creating a snapshot in local repository")
@@ -183,6 +258,10 @@ func (this *SnapshotManager) CreateSnapshot(peID astrolabe.ProtectedEntityID, ta
 	}
 
 	return updatedPeID, nil
+}
+
+func (this *SnapshotManager) DeleteSnapshotWithBackupRepository(peID astrolabe.ProtectedEntityID) error {
+	return nil
 }
 
 func (this *SnapshotManager) DeleteSnapshot(peID astrolabe.ProtectedEntityID) error {
