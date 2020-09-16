@@ -105,13 +105,22 @@ func (c *uploadController) enqueueUploadItem(obj interface{}) {
 
 	switch req.Status.Phase {
 	case "", pluginv1api.UploadPhaseNew, pluginv1api.UploadPhaseInProgress, pluginv1api.UploadPhaseUploadError, pluginv1api.UploadPhaseCanceling:
-		// Process New and InProgress and UploadError Uploads
-	case pluginv1api.UploadPhaseCanceled:
-		// The upload was canceled, nothing to do.
-		log.Debug("The upload request was canceled")
-		return
+		// Process New and InProgress and UploadError and UploadCanceling Uploads
 	default:
-		log.Debug("Upload CR is not New or InProgress or UploadError, skipping")
+		log.Debug("Upload CR is not New or InProgress or UploadError or UploadCanceling, skipping")
+		if req.Status.Phase == pluginv1api.UploadPhaseCanceled {
+			// The upload was canceled, nothing to do.
+			log.Debug("The upload request was canceled")
+		}
+		// If Upload CR status reaches terminal state more than 1 hour, Upload CR should be deleted
+		now := c.clock.Now()
+		if req.Status.CompletionTimestamp.Add(time.Hour).Unix() < now.Unix() {
+			log.Infof("Upload CR %s reaches phase %v more than 1 hour, deleting this CR.", req.Name, req.Status.Phase)
+			err := c.uploadClient.Uploads(req.Namespace).Delete(context.TODO(), req.Name, metav1.DeleteOptions{})
+			if err != nil {
+				log.WithError(err).Errorf("Failed to delete Upload CR which is in %v phase.", req.Status.Phase)
+			}
+		}
 		return
 	}
 

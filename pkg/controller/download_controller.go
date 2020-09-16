@@ -100,6 +100,15 @@ func (c *downloadController) enqueueDownloadItem(obj interface{}) {
 		// Process New InProgress and Retry Downloads
 	default:
 		log.Debug("Download CR is not New or InProgress or Retry, skipping")
+		// If Download CR status reaches terminal state more than 1 hour, Download CR should be deleted
+		now := c.clock.Now()
+		if req.Status.CompletionTimestamp.Add(time.Hour).Unix() < now.Unix() {
+			log.Infof("Download CR %s reaches phase %v more than 1 hour, deleting this CR.", req.Name, req.Status.Phase)
+			err := c.downloadClient.Downloads(req.Namespace).Delete(context.TODO(), req.Name, metav1.DeleteOptions{})
+			if err != nil {
+				log.WithError(err).Errorf("Failed to delete Download CR which is in %v phase.", req.Status.Phase)
+			}
+		}
 		return
 	}
 
